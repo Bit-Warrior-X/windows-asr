@@ -1,0 +1,1 @@
+SpeechRecognizer/SpeechRecognizer/lib/sherpa-onnx-core.lib filter=lfs diff=lfs merge=lfs -text

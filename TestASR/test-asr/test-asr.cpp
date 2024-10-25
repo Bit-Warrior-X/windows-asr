@@ -27,8 +27,8 @@ int main()
 	cout << "Welcome to our Windows-ASR" << endl;
 
 	Configuration config;
-	config.modelDir = "C:\\asrmodel\\asr\\en\\";
-	config.recordingDir = "C:\\recordings\\";
+	config.modelDir = "C:\\asr_testing\\asr_ort\\en\\";
+	config.recordingDir = "C:\\asr_testing\\recordings\\";
 	config.modelSampleRate = 16000;
 	config.recordSherpaAudio = true;
 	config.resultMode = "tokens";
@@ -43,7 +43,7 @@ int main()
 	recognizer->removeListener(displayRecognition1);
 
 	recognizer->flushSpeech("Hello! Nice to meet you");
-	recognizer->recognizeAudio("C:\\recordings\\sample1.wav", "C:\\recordings\\output_sample.txt");
+	recognizer->recognizeAudio("C:\\asr_testing\\recordings\\sample1.wav", "C:\\asr_testing\\recordings\\output_sample.txt");
 	cout << "Press Any key to Start recording" << endl;
 	ch = getchar();
 

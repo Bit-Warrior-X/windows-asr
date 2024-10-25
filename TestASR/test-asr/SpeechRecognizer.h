@@ -203,7 +203,7 @@ public:
     HRESULT ConvertWavToAac(LPCWSTR inputFilePath, LPCWSTR outputFilePath);
 
     // Set Context biasing 
-    void setContextBiasing(std::vector<std::vector<int32_t>> contextList, bool destroyStream);
+    void setContextBiasing(std::string hotWords, bool destroyStream);
 
 private:
     Configuration configuration;

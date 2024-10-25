@@ -543,7 +543,7 @@ SpeechRecognizer::resetSpeech()
 
     threadCallbackList.push([this]{ 
         cout << "resetSpeech sherpa" << endl;
-        Reset(this->sherpaRecognizer.load(), this->sherpaStream.load());
+        SherpaOnnxOnlineStreamReset(this->sherpaRecognizer.load(), this->sherpaStream.load());        
         cout << "resetSpeech sherpa done" << endl;
     });
 }
@@ -599,7 +599,7 @@ void SpeechRecognizer::removeAllLevelListeners()
     levelCallbackList.clear();
 }
 
-void SpeechRecognizer::setContextBiasing(std::vector<std::vector<int32_t>> contextList, bool destroyStream)
+void SpeechRecognizer::setContextBiasing(std::string hotWords, bool destroyStream)
 {
     if (!isInitialized || recognizerStatus == SpeechRecognizerStart)
     {
@@ -607,12 +607,12 @@ void SpeechRecognizer::setContextBiasing(std::vector<std::vector<int32_t>> conte
         return;
     }
 
-    threadCallbackList.push([this, contextList, destroyStream]{
+    threadCallbackList.push([this, hotWords, destroyStream]{
         cout << "Run setContextBiasing" << endl;
         if (destroyStream && this->sherpaStream.load()) {
             try {
                 cout << "Delete current stream" << endl;
-                DestroyOnlineStream(this->sherpaStream.load());
+                SherpaOnnxDestroyOnlineStream(this->sherpaStream.load());
                 cout << "Release current stream" << endl;
                 this->sherpaStream.store(NULL);
             }
@@ -628,48 +628,8 @@ void SpeechRecognizer::setContextBiasing(std::vector<std::vector<int32_t>> conte
 
         cout << "call CreateOnlineStreamWithContext" << endl;
         try {
-            std::vector<int32_t> vectorSizesRaw;
-            for (auto& vec : contextList) {
-                auto size = static_cast<int32_t>(vec.size());
-                vectorSizesRaw.push_back(size);
-            }
-
-            // Convert contextList to a raw pointer representation
-            std::vector<int32_t*> contextListRaw;
-            contextListRaw.reserve(contextList.size());
-            for (size_t i = 0; i < contextList.size(); ++i) {
-                auto temp = contextList[i];
-                int32_t* data = temp.data();
-                contextListRaw.push_back(data);
-            }
-
-            cout << "[vectorSizesRaw] " << vectorSizesRaw.size() << endl;
-            for (const auto& element : vectorSizesRaw) {
-                std::cout << element << " ";
-            }
-            std::cout << std::endl;
-
-            cout << "[contextList] " << contextList.size() << endl;
-            for (const auto& innerVec : contextList) {
-                for (const auto& num : innerVec) {
-                    std::cout << num << ' ';
-                }
-                std::cout << '\n';
-            }
-
-            auto size = static_cast<int32_t>(contextList.size());
-            int32_t** contextListRawArray = new int32_t * [size];
-            for (std::size_t i = 0; i < size; ++i) {
-                contextListRawArray[i] = contextListRaw[i];
-            }
-            auto vectorSizeList = const_cast<const int32_t*>(vectorSizesRaw.data());
-
-            auto newStream = CreateOnlineStreamWithContext(this->sherpaRecognizer.load(), contextListRawArray, size, vectorSizeList);
-            cout << "created new stream" << endl;
+            auto newStream = SherpaOnnxCreateOnlineStreamWithHotwords(this->sherpaRecognizer.load(), hotWords.c_str());
             this->sherpaStream.store(newStream);
-            cout << "Replaced stream" << endl;
-            delete[] contextListRawArray;
-            cout << "Release data" << endl;
         }
         catch (const std::exception& e) { // This will catch all standard exceptions
             std::cerr << "Can not create new stream error: " << e.what() << '\n';
@@ -680,7 +640,7 @@ void SpeechRecognizer::setContextBiasing(std::vector<std::vector<int32_t>> conte
 
         if (!this->sherpaStream.load()) {
             cout << "Cannot create context stream, try to create new normal stream" << endl;
-            auto newStream = CreateOnlineStream(this->sherpaRecognizer.load());
+            auto newStream = SherpaOnnxCreateOnlineStream(this->sherpaRecognizer.load());
             cout << "created new normal stream" << endl;
             this->sherpaStream.store(newStream);
             cout << "Replaced normal stream" << endl;
@@ -837,7 +797,7 @@ SpeechRecognizer::InitializeRecognition()
     config.model_config.transducer.decoder = decoder.c_str();   
     config.model_config.transducer.joiner = joiner.c_str();
 
-    config.context_score = configuration.contextScore;
+    config.hotwords_score = configuration.contextScore;
     config.decoding_method = configuration.decodeMethod.c_str();
     config.model_config.num_threads = (int32_t)configuration.numThreads;
     config.enable_endpoint = (int32_t)(configuration.enableEndPoint ? 1 : 0);
@@ -853,10 +813,10 @@ SpeechRecognizer::InitializeRecognition()
 
     cout << "Configuration:\n" << configuration << endl;
     cout << "Initializing Recognition create recognizer" << endl;
-    sherpaRecognizer.store(CreateOnlineRecognizer(&config));
+    sherpaRecognizer.store(SherpaOnnxCreateOnlineRecognizer(&config));    
 
     cout << "Initializing Recognition create stream" << endl;
-    sherpaStream.store(CreateOnlineStream(sherpaRecognizer.load()));
+    sherpaStream.store(SherpaOnnxCreateOnlineStream(sherpaRecognizer.load()));
 
     cout << "Initializing Recognition complete" << endl;
 
@@ -891,15 +851,16 @@ SpeechRecognizer::Recognize(int8_t* sampledBytes, int nBytes, int index)
         it(volumeLevel);
     }
 
-    AcceptWaveform(sherpaStream.load(), 16000, samples, nSamples);
+    SherpaOnnxOnlineStreamAcceptWaveform(sherpaStream.load(), 16000, samples, nSamples);
 
-    while (IsOnlineStreamReady(sherpaRecognizer.load(), sherpaStream.load())) {
-        DecodeOnlineStream(sherpaRecognizer.load(), sherpaStream.load());
+    
+    while (SherpaOnnxIsOnlineStreamReady(sherpaRecognizer.load(), sherpaStream.load())) {
+         SherpaOnnxDecodeOnlineStream(sherpaRecognizer.load(), sherpaStream.load());
     }
 
     static std::string lastText;
-    bool is_endpoint = IsEndpoint(sherpaRecognizer.load(), sherpaStream.load());
-    SherpaOnnxOnlineRecognizerResult* r = GetOnlineStreamResult(sherpaRecognizer.load(), sherpaStream.load());
+    bool is_endpoint = SherpaOnnxOnlineStreamIsEndpoint(sherpaRecognizer.load(), sherpaStream.load());
+    const SherpaOnnxOnlineRecognizerResult* r = SherpaOnnxGetOnlineStreamResult(sherpaRecognizer.load(), sherpaStream.load());
 
     std::string recogText;
     if (configuration.resultMode == "tokens") {
@@ -941,10 +902,10 @@ SpeechRecognizer::Recognize(int8_t* sampledBytes, int nBytes, int index)
             it(recogText, is_endpoint, true);
         }
         //resetSpeech();
-        Reset(this->sherpaRecognizer.load(), this->sherpaStream.load());
+        SherpaOnnxOnlineStreamReset(this->sherpaRecognizer.load(), this->sherpaStream.load());
     }
 
-    DestroyOnlineRecognizerResult(r);
+    SherpaOnnxDestroyOnlineRecognizerResult(r);    
 
     return S_OK;
 }
@@ -953,9 +914,9 @@ HRESULT
 SpeechRecognizer::FinializeRecognition()
 {
     if (sherpaStream.load())
-        DestroyOnlineStream(sherpaStream.load());
+        SherpaOnnxDestroyOnlineStream(sherpaStream.load());    
     if (sherpaRecognizer.load())
-        DestroyOnlineRecognizer(sherpaRecognizer.load());
+        SherpaOnnxDestroyOnlineRecognizer(sherpaRecognizer.load());
     sherpaStream.store(NULL);
     sherpaRecognizer.store(NULL);
     return S_OK;
@@ -1062,7 +1023,7 @@ SpeechRecognizer::recognizeAudio(std::string audio_path, std::string output_path
     int8_t buffer[RECOG_BLOCK_SIZ * 2];
     float samples[RECOG_BLOCK_SIZ];
 
-    SherpaOnnxOnlineStream* s = CreateOnlineStream(sherpaRecognizer.load());
+    SherpaOnnxOnlineStream* s = SherpaOnnxCreateOnlineStream(sherpaRecognizer.load());    
 
     int32_t segment_id = -1;
 
@@ -1076,12 +1037,13 @@ SpeechRecognizer::recognizeAudio(std::string audio_path, std::string output_path
                 samples[sampleCount] = ((static_cast<int16_t>(buffer[i + 1]) << 8) | (uint8_t)buffer[i]) / 32768.f;
             }
 
-            AcceptWaveform(sherpaStream.load(), 16000, samples, sampleCount);
-            while (IsOnlineStreamReady(sherpaRecognizer.load(), sherpaStream.load())) {
-                DecodeOnlineStream(sherpaRecognizer.load(), sherpaStream.load());
+            SherpaOnnxOnlineStreamAcceptWaveform(sherpaStream.load(), 16000, samples, sampleCount);
+            
+            while (SherpaOnnxIsOnlineStreamReady(sherpaRecognizer.load(), sherpaStream.load())) {
+                SherpaOnnxDecodeOnlineStream(sherpaRecognizer.load(), sherpaStream.load());                
             }
-
-            SherpaOnnxOnlineRecognizerResult* r = GetOnlineStreamResult(sherpaRecognizer.load(), sherpaStream.load());
+            
+            const SherpaOnnxOnlineRecognizerResult* r = SherpaOnnxGetOnlineStreamResult(sherpaRecognizer.load(), sherpaStream.load());
             if (configuration.resultMode == "tokens") {
                 const char* p = r->tokens;
                 auto count = r->count;
@@ -1111,7 +1073,7 @@ SpeechRecognizer::recognizeAudio(std::string audio_path, std::string output_path
                 }
             }
             
-            DestroyOnlineRecognizerResult(r);
+            SherpaOnnxDestroyOnlineRecognizerResult(r);            
         }
     }
     fclose(fp);

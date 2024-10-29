@@ -75,6 +75,18 @@ struct Configuration {
     std::string decoderName = "decoder.int8.ort";
     std::string joinerName = "joiner.int8.ort";
 
+    // VAD params
+    std::string vadModelDir = "";
+    std::string vadModelName = "silero_vad.ort";
+    float vadThreshold = 0.25f;
+    float vadMinSilenceDuration = 0.20f;
+    float vadMinSpeechDuration = 0.15f;
+    float vadMaxSpeechDuration = 5.0f;
+    int vadWindowsSize = 400;
+    int vadSampleRate = 16000;
+    int vadNumThread = 1;
+    std::string vadProvider = "cpu";
+
     std::string tokensPath() {
         return modelDir + tokensName;
     }
@@ -89,6 +101,10 @@ struct Configuration {
 
     std::string joinerPath() {
         return modelDir + joinerName;
+    }
+
+    std::string vadPath() {
+        return vadModelDir + vadModelName;
     }
 
     friend std::ostream& operator<<(std::ostream& os, const Configuration& config) {
@@ -114,6 +130,15 @@ struct Configuration {
         os << "encoderName = " << config.encoderName << "\n";
         os << "decoderName = " << config.decoderName << "\n";
         os << "joinerName = " << config.joinerName << "\n";
+        os << "vadModelName = " << config.vadModelName << "\n";
+        os << "vadThreshold = " << config.vadThreshold << "\n";
+        os << "vadMinSilenceDuration = " << config.vadMinSilenceDuration << "\n";
+        os << "vadMinSpeechDuration = " << config.vadMinSpeechDuration << "\n";
+        os << "vadMaxSpeechDuration = " << config.vadMaxSpeechDuration << "\n";
+        os << "vadWindowsSize = " << config.vadWindowsSize << "\n";
+        os << "vadSampleRate = " << config.vadSampleRate << "\n";
+        os << "vadNumThread = " << config.vadNumThread << "\n";
+        os << "vadProvider = " << config.vadProvider << "\n";
         return os;
     }
 };
@@ -179,10 +204,10 @@ public:
     void flushSpeech(std::string speechText); // set speech text property
 
     // Add a callback to receive string value from ASR
-    void addListener(const std::function<void(const std::string&, bool, bool)>& listener);
+    void addListener(const std::function<void(const std::string&, bool, bool, bool, bool)>& listener);
 
     // Remove a callback ASR
-    void removeListener(const std::function<void(const std::string&, bool, bool)>& listener);
+    void removeListener(const std::function<void(const std::string&, bool, bool, bool, bool)>& listener);
 
     // Clear all listeners
     void removeAllListeners();
@@ -213,9 +238,11 @@ private:
     SpeechRecognizerStatus recognizerStatus;
     bool isInitialized;
 
-    vector<std::function<void(const std::string&, bool, bool)>> recogCallbackList;
+    vector<std::function<void(const std::string&, bool, bool, bool, bool)>> recogCallbackList;
     vector<std::function<void(float)>> levelCallbackList;
     queue<std::function<void()>> threadCallbackList;
+    SherpaOnnxVoiceActivityDetector* vad = nullptr;
+
 private:
     // resample variables and functions
     WWMFResampler iResampler;
@@ -238,6 +265,7 @@ private:
 
 public:
     SherpaOnnxOnlineRecognizerConfig config;
+    SherpaOnnxVadModelConfig vadConfig;
     int curRecogBockIndex;
     HWAVEIN hWaveIn;
     list < WAVEHDR*> WaveHdrList;

@@ -10,11 +10,11 @@ using namespace std;
 #include "SpeechRecognizer.h"
 
 
-void displayRecognition1(const std::string& str, bool isEndpoint, bool isReset)
+void displayRecognition1(const std::string& str, bool isEndpoint, bool isReset, bool isVoiceActive, bool isNoSpeech)
 {
 	cout << " displayRecognition1 -> " << str << isEndpoint << endl;
 }
-void displayRecognition2(const std::string& str, bool isEndpoint, bool isReset)
+void displayRecognition2(const std::string& str, bool isEndpoint, bool isReset, bool isVoiceActive, bool isNoSpeech)
 {
 	cout << " displayRecognition2 -> " << str << isEndpoint << endl;
 }
@@ -32,6 +32,7 @@ int main()
 	config.modelSampleRate = 16000;
 	config.recordSherpaAudio = true;
 	config.resultMode = "tokens";
+	config.vadModelDir = "C:\\asr_testing\\asr_ort\\";
 	
 
 	std::unique_ptr<SpeechRecognizer> recognizer = std::make_unique<SpeechRecognizer>(config);

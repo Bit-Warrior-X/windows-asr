@@ -25,6 +25,16 @@
 #define SAMPLEBLOCK_SIZE    6400                                        // Sample rate is fixed to 16 kHz  TARGET_SAMPLE_RATE * BLOCK_ALIGN * 400 / 1000
 #define RECOG_BLOCK_SIZ     3200                                        // SAMPLEBLOCK_SIZE / BlockAlign
 
+const int VAD_PATIENCE = 6;                // Number of frames to wait after speech ends
+const int VAD_RESET_PATIENCE = 6;          // Frames to wait before resetting ASR after speech ends
+const int VAD_RULE1_RESET_PATIENCE = 8;    // For handling long silences
+const int TAIL_PADDING_SIZE = static_cast<int>(0.16f * 16000); // 160ms of silence at 16kHz
+
+// Patience counters
+static int vadPatienceCounter = VAD_PATIENCE;
+static int vadResetPatienceCounter = VAD_RESET_PATIENCE;
+
+
 // This is an example of an exported variable
 SPEECHRECOGNIZER_API int nSpeechRecognizer=0;
 
@@ -570,7 +580,7 @@ size_t getAddress(std::function<T(U...)> f) {
 }
 
 void
-SpeechRecognizer::addListener(const std::function<void(const std::string&, bool, bool)>& listener)
+SpeechRecognizer::addListener(const std::function<void(const std::string&, bool, bool, bool, bool)>& listener)
 {
     recogCallbackList.push_back(listener);
 }
@@ -653,7 +663,7 @@ void SpeechRecognizer::setContextBiasing(std::string hotWords, bool destroyStrea
 
 
 void
-SpeechRecognizer::removeListener(const std::function<void(const std::string&, bool, bool)>& listener)
+SpeechRecognizer::removeListener(const std::function<void(const std::string&, bool, bool, bool, bool)>& listener)
 {
     for (auto it = recogCallbackList.begin(); it != recogCallbackList.end(); it++) {
         if (getAddress(*it) == getAddress(listener)) {
@@ -782,21 +792,24 @@ SpeechRecognizer::InitializeRecognition()
     std::string encoder = configuration.encoderPath();
     std::string decoder = configuration.decoderPath();
     std::string joiner = configuration.joinerPath();
+    std::string vadPath = configuration.vadPath();
     
     // validate paths
     if (!IsFileExist(tokens) || !IsFileExist(encoder)
-        || !IsFileExist(decoder) || !IsFileExist(joiner))
+        || !IsFileExist(decoder) || !IsFileExist(joiner) || !IsFileExist(vadPath))
     {
         throw std::invalid_argument("invalid model path");
     }        
 
     memset(&config, 0, sizeof(config));
 
+    // config asr model
     config.model_config.tokens = tokens.c_str();   
     config.model_config.transducer.encoder = encoder.c_str();   
     config.model_config.transducer.decoder = decoder.c_str();   
     config.model_config.transducer.joiner = joiner.c_str();
 
+    // config asr params
     config.hotwords_score = configuration.contextScore;
     config.decoding_method = configuration.decodeMethod.c_str();
     config.model_config.num_threads = (int32_t)configuration.numThreads;
@@ -811,12 +824,32 @@ SpeechRecognizer::InitializeRecognition()
     config.model_config.provider = configuration.provider.c_str();
     config.model_config.model_type = configuration.modelType.c_str();
 
+    // config VAD model
+    
+    memset(&vadConfig, 0, sizeof(vadConfig));
+    vadConfig.silero_vad.model = vadPath.c_str();
+    vadConfig.silero_vad.threshold = configuration.vadThreshold;         
+    vadConfig.silero_vad.min_silence_duration = configuration.vadMinSilenceDuration;
+    vadConfig.silero_vad.min_speech_duration = configuration.vadMinSpeechDuration;
+    vadConfig.silero_vad.max_speech_duration = configuration.vadMaxSpeechDuration;
+    vadConfig.silero_vad.window_size = configuration.vadWindowsSize;
+    vadConfig.sample_rate = (int32_t)configuration.vadSampleRate;
+    vadConfig.num_threads = (int32_t)configuration.vadNumThread;
+    vadConfig.debug = (int32_t)(configuration.debug ? 1 : 0);
+
     cout << "Configuration:\n" << configuration << endl;
     cout << "Initializing Recognition create recognizer" << endl;
     sherpaRecognizer.store(SherpaOnnxCreateOnlineRecognizer(&config));    
 
     cout << "Initializing Recognition create stream" << endl;
     sherpaStream.store(SherpaOnnxCreateOnlineStream(sherpaRecognizer.load()));
+
+    cout << "Initializing Recognition create vad" << endl;
+    vad = SherpaOnnxCreateVoiceActivityDetector(&vadConfig, 30);
+
+    if (vad == nullptr) {
+        fprintf(stderr, "Failed to create VAD model.\n");
+    }
 
     cout << "Initializing Recognition complete" << endl;
 
@@ -834,78 +867,182 @@ float calculateRMS(const float* samples, int nSamples) {
 HRESULT
 SpeechRecognizer::Recognize(int8_t* sampledBytes, int nBytes, int index)
 {
-    if (sherpaStream.load() == NULL || sherpaRecognizer.load() == NULL)
+    if (sherpaStream.load() == NULL || sherpaRecognizer.load() == NULL || vad == NULL)
         return S_FALSE;
 
     float samples[RECOG_BLOCK_SIZ];
 
     int32_t segment_id = -1;
     int nSamples = 0;
+    static std::string lastText;
 
+    // Convert int8_t samples to float samples
     for (int i = 0; i < nBytes; i += 2, nSamples++) {
         samples[nSamples] = ((static_cast<int16_t>(sampledBytes[i + 1]) << 8) | (uint8_t)sampledBytes[i]) / 32768.f;
     }
 
+    // Calculate volume level for any callbacks or UI updates
     float volumeLevel = calculateRMS(samples, nSamples);
     for (auto& it : levelCallbackList) {
         it(volumeLevel);
     }
 
-    SherpaOnnxOnlineStreamAcceptWaveform(sherpaStream.load(), 16000, samples, nSamples);
-
-    
-    while (SherpaOnnxIsOnlineStreamReady(sherpaRecognizer.load(), sherpaStream.load())) {
-         SherpaOnnxDecodeOnlineStream(sherpaRecognizer.load(), sherpaStream.load());
+    // Feed samples to VAD in chunks
+    int window_size = vadConfig.silero_vad.window_size;
+    for (int offset = 0; offset < nSamples; offset += window_size) {
+        int chunk_size = min(window_size, nSamples - offset);
+        SherpaOnnxVoiceActivityDetectorAcceptWaveform(vad, &samples[offset], (int32_t)chunk_size);
     }
 
-    static std::string lastText;
-    bool is_endpoint = SherpaOnnxOnlineStreamIsEndpoint(sherpaRecognizer.load(), sherpaStream.load());
-    const SherpaOnnxOnlineRecognizerResult* r = SherpaOnnxGetOnlineStreamResult(sherpaRecognizer.load(), sherpaStream.load());
+    // Check if VAD detects speech
+    bool hasSpeech = SherpaOnnxVoiceActivityDetectorDetected(vad) != 0;
 
-    std::string recogText;
-    if (configuration.resultMode == "tokens") {
-        auto p = r->tokens;
-        auto count = r->count;
-        std::ostringstream oss;
-        for (int32_t i = 0; i < count; ++i) {
-            if (i != 0) {
-                oss << " "; // add a space between tokens
-            }
-            oss << p;
-            p += strlen(p) + 1;
+    // Implement VAD logic
+    if (hasSpeech) {
+        vadPatienceCounter = VAD_PATIENCE;
+        vadResetPatienceCounter = VAD_RESET_PATIENCE;
+    }
+
+    if (hasSpeech || vadPatienceCounter > 0) {
+        // Feed samples to ASR recognizer
+        if (!hasSpeech) {
+            vadPatienceCounter--;
         }
 
-        recogText = oss.str();
+        SherpaOnnxOnlineStreamAcceptWaveform(sherpaStream.load(), (int32_t)configuration.modelSampleRate, samples, nSamples);
+
+        // Run ASR decoding
+        while (SherpaOnnxIsOnlineStreamReady(sherpaRecognizer.load(), sherpaStream.load())) {
+            SherpaOnnxDecodeOnlineStream(sherpaRecognizer.load(), sherpaStream.load());
+        }
+
+        const SherpaOnnxOnlineRecognizerResult* r = SherpaOnnxGetOnlineStreamResult(sherpaRecognizer.load(), sherpaStream.load());
+        std::string recogText;
+        if (configuration.resultMode == "tokens") {
+            auto p = r->tokens;
+            auto count = r->count;
+            std::ostringstream oss;
+            for (int32_t i = 0; i < count; ++i) {
+                if (i != 0) {
+                    oss << " "; // add a space between tokens
+                }
+                oss << p;
+                p += strlen(p) + 1;
+            }
+
+            recogText = oss.str();
+        }
+        else if (configuration.resultMode == "json") {
+            std::ostringstream oss;
+            auto json = r->json;
+            oss << json;
+            recogText = oss.str();
+        }
+        else {
+            recogText = r->text;
+        }
+
+        if (!recogText.empty() && lastText != recogText) {
+            lastText = recogText;
+            std::transform(recogText.begin(), recogText.end(), recogText.begin(),
+                [](auto c) { return std::tolower(c); });
+
+            for (auto& it : recogCallbackList) {
+                it(recogText, false, false, false, false);
+            }
+        }
     }
-    else if (configuration.resultMode == "json") {
-        std::ostringstream oss;
-        auto json = r->json;
-        oss << json;
-        recogText = oss.str();
+    else if (vadResetPatienceCounter >= 0) {
+        // Handle tail padding and reset logic
+        if (vadResetPatienceCounter == 0) {
+            // Add tail padding
+            float tailPadding[TAIL_PADDING_SIZE] = { 0 }; // 160ms of silence
+
+            SherpaOnnxOnlineStreamAcceptWaveform(sherpaStream.load(), (int32_t)configuration.modelSampleRate, tailPadding, TAIL_PADDING_SIZE);
+
+            // Final ASR decoding
+            while (SherpaOnnxIsOnlineStreamReady(sherpaRecognizer.load(), sherpaStream.load())) {
+                SherpaOnnxDecodeOnlineStream(sherpaRecognizer.load(), sherpaStream.load());
+            }
+
+            const SherpaOnnxOnlineRecognizerResult* r = SherpaOnnxGetOnlineStreamResult(sherpaRecognizer.load(), sherpaStream.load());
+            std::string recogText;
+            if (configuration.resultMode == "tokens") {
+                auto p = r->tokens;
+                auto count = r->count;
+                std::ostringstream oss;
+                for (int32_t i = 0; i < count; ++i) {
+                    if (i != 0) {
+                        oss << " "; // add a space between tokens
+                    }
+                    oss << p;
+                    p += strlen(p) + 1;
+                }
+
+                recogText = oss.str();
+            }
+            else if (configuration.resultMode == "json") {
+                std::ostringstream oss;
+                auto json = r->json;
+                oss << json;
+                recogText = oss.str();
+            }
+            else {
+                recogText = r->text;
+            }
+
+            if (!recogText.empty() && lastText != recogText) {
+                lastText = recogText;
+                std::transform(recogText.begin(), recogText.end(), recogText.begin(),
+                    [](auto c) { return std::tolower(c); });
+
+                for (auto& it : recogCallbackList) {
+                    it(recogText, true, true, true, !hasSpeech);
+                }
+            }
+
+            // Reset ASR stream
+            SherpaOnnxOnlineStreamReset(sherpaRecognizer.load(), sherpaStream.load());
+
+            // Reset VAD
+            while (!SherpaOnnxVoiceActivityDetectorEmpty(vad)) {
+                const SherpaOnnxSpeechSegment* segment = SherpaOnnxVoiceActivityDetectorFront(vad);
+                SherpaOnnxDestroySpeechSegment(segment);
+                SherpaOnnxVoiceActivityDetectorPop(vad);
+            }
+
+            // Reset counters
+            vadResetPatienceCounter = -1;
+            vadPatienceCounter = VAD_PATIENCE;
+        }
+        else {
+            vadResetPatienceCounter--;
+        }
     }
     else {
-        recogText = r->text;
-    }
-
-    if (!recogText.empty() && lastText != recogText) {
-        lastText = recogText;
-        std::transform(recogText.begin(), recogText.end(), recogText.begin(),
-            [](auto c) { return std::tolower(c); });
-
         for (auto& it : recogCallbackList) {
-            it(recogText, is_endpoint, false);
+            it("", false, false, false, false);
         }
-    }
+        // Handle long silences and reset ASR if needed
+        if (vadResetPatienceCounter == -VAD_RULE1_RESET_PATIENCE) {
+            // Reset ASR stream
+            SherpaOnnxOnlineStreamReset(sherpaRecognizer.load(), sherpaStream.load());
 
-    if (is_endpoint) {
-        for (auto& it : recogCallbackList) {
-            it(recogText, is_endpoint, true);
+            // Reset VAD
+            while (!SherpaOnnxVoiceActivityDetectorEmpty(vad)) {
+                const SherpaOnnxSpeechSegment* segment = SherpaOnnxVoiceActivityDetectorFront(vad);
+                SherpaOnnxDestroySpeechSegment(segment);
+                SherpaOnnxVoiceActivityDetectorPop(vad);
+            }
+
+            // Reset counters
+            vadResetPatienceCounter = -1;
+            vadPatienceCounter = VAD_PATIENCE;
         }
-        //resetSpeech();
-        SherpaOnnxOnlineStreamReset(this->sherpaRecognizer.load(), this->sherpaStream.load());
-    }
-
-    SherpaOnnxDestroyOnlineRecognizerResult(r);    
+        else {
+            vadResetPatienceCounter--;
+        }
+    }    
 
     return S_OK;
 }

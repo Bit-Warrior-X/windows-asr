@@ -169,7 +169,10 @@ enum SpeechRecognizerStatus {
 };
 
 
-// This class is exported from the dll
+/// <summary>
+/// Speech recognizer to manage recognizing and recording microphone
+///  This class is exported from the dll
+/// </summary>
 class SPEECHRECOGNIZER_API SpeechRecognizer
 {
 public:
@@ -179,68 +182,160 @@ public:
     SpeechRecognizer(const Configuration& config, std::string speechText, std::string recordingId);
     ~SpeechRecognizer();
 
-    // Start to listen audio
+    /// <summary>
+    /// Start to listen mic audio
+    /// </summary>
+    /// <returns></returns>
     HRESULT listen();
 
-    // Stop to listen audio
+    /// <summary>
+    /// Stop to listen mic audio
+    /// </summary>
+    /// <returns></returns>
     HRESULT stopListening();
 
-    // Pause listen
+    /// <summary>
+    /// Pause listen
+    /// </summary>
+    /// <returns></returns>
     HRESULT mute();
 
-    // Resume listen
+    /// <summary>
+    /// Resume listen
+    /// </summary>
+    /// <returns></returns>
     HRESULT unmute();
 
-    // Setup microphone and ASR model
+    /// <summary>
+    /// Setup microphone and ASR model
+    /// </summary>
+    /// <param name="recordingId"></param>
+    /// <param name="recordingPath_s"></param>
+    /// <returns></returns>
     HRESULT initialize(std::string recordingId, std::string recordingPath_s); // set recordingId property
 
-    // Release all resources
+    /// <summary>
+    /// Release all resources
+    /// </summary>
     void release();
 
-    // Reset ASR speech
+    /// <summary>
+    /// Reset ASR speech
+    /// </summary>
     void resetSpeech();
 
-    // flush speech 
+    /// <summary>
+    /// flush speech
+    /// </summary>
+    /// <param name="speechText"></param>
     void flushSpeech(std::string speechText); // set speech text property
 
-    // Add a callback to receive string value from ASR
+    /// <summary>
+    /// Add a callback (text, isEndpoint, isReset, isVoiceActive, isNoSpeech) to receive value from ASR
+    /// </summary>
+    /// <param name="listener"></param>
     void addListener(const std::function<void(const std::string&, bool, bool, bool, bool)>& listener);
 
-    // Remove a callback ASR
+    /// <summary>
+    /// Remove a callback (text, isEndpoint, isReset, isVoiceActive, isNoSpeech) ASR
+    /// </summary>
+    /// <param name="listener"></param>
     void removeListener(const std::function<void(const std::string&, bool, bool, bool, bool)>& listener);
 
-    // Clear all listeners
+    /// <summary>
+    /// Clear all listeners
+    /// </summary>
     void removeAllListeners();
 
-    // Add a callback to receive volume level
+    /// <summary>
+    /// Add a callback to receive volume level
+    /// </summary>
+    /// <param name="listener"></param>
     void addLevelListener(const std::function<void(float)>& listener);
 
-    // Remove a callback level
+    /// <summary>
+    /// Remove a callback level
+    /// </summary>
+    /// <param name="listener"></param>
     void removeLevelListener(const std::function<void(float)>& listener);
 
-    // Clear all levels listeners
+    /// <summary>
+    /// Clear all levels listeners
+    /// </summary>
     void removeAllLevelListeners();
 
-    // Recognize from file
+    /// <summary>
+    /// Recognize from file
+    /// </summary>
+    /// <param name="audio_path"></param>
+    /// <param name="output_path"></param>
     void recognizeAudio(std::string audio_path, std::string output_path);
 
-    // Convert wav to aac 
+    /// <summary>
+    /// Convert wav to aac 
+    /// </summary>
+    /// <param name="inputFilePath"></param>
+    /// <param name="outputFilePath"></param>
+    /// <returns></returns>
     HRESULT ConvertWavToAac(LPCWSTR inputFilePath, LPCWSTR outputFilePath);
 
-    // Set Context biasing 
+    /// <summary>
+    /// Set Context biasing 
+    /// </summary>
+    /// <param name="hotWords"></param>
+    /// <param name="destroyStream"></param>
     void setContextBiasing(std::string hotWords, bool destroyStream);
 
 private:
+    /// <summary>
+    /// Configuation for ASR and VAD
+    /// </summary>
     Configuration configuration;
+
+    /// <summary>
+    /// Text to recognize
+    /// </summary>
     std::string speechText;
+
+    /// <summary>
+    /// Recording id for audio file
+    /// </summary>
     std::string recordingId;
+
+    /// <summary>
+    /// Recording audio path
+    /// </summary>
     std::string recordingPath;
+
+    /// <summary>
+    /// Speech status
+    /// </summary>
     SpeechRecognizerStatus recognizerStatus;
+
+
+    /// <summary>
+    /// Flag to indicate speech initialized
+    /// </summary>
     bool isInitialized;
 
+    /// <summary>
+    /// A callback (text, isEndpoint, isReset, isVoiceActive, isNoSpeech) list
+    /// </summary>
     vector<std::function<void(const std::string&, bool, bool, bool, bool)>> recogCallbackList;
+
+    /// <summary>
+    /// A level callback list
+    /// </summary>
     vector<std::function<void(float)>> levelCallbackList;
+
+    /// <summary>
+    /// List of tasks to execute into the same ASR thread
+    /// </summary>
     queue<std::function<void()>> threadCallbackList;
+
+    /// <summary>
+    /// VAD
+    /// </summary>
     SherpaOnnxVoiceActivityDetector* vad = nullptr;
 
 private:
@@ -272,7 +367,24 @@ public:
     list < WAVEHDR*> WaveHdrSherpaList;
     SpeechRecognizerStatus getRecognizerStatus();
     bool isSerpaRecording();
+
+    /// <summary>
+    /// Resample audio buffer
+    /// </summary>
+    /// <param name="Block"></param>
+    /// <param name="nBytes"></param>
+    /// <param name="SampleBlock"></param>
+    /// <param name="nSampleBytes"></param>
+    /// <returns></returns>
     HRESULT Resample(BYTE* Block, int nBytes, BYTE* SampleBlock, int* nSampleBytes);
+
+    /// <summary>
+    /// Recognize mic buffer
+    /// </summary>
+    /// <param name="sampledBytes"></param>
+    /// <param name="nBytes"></param>
+    /// <param name="index"></param>
+    /// <returns></returns>
     HRESULT Recognize(int8_t* sampledBytes, int nBytes, int index);
 
     std::list <WAVEHDR* >::iterator recogIt;

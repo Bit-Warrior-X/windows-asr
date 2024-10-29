@@ -590,6 +590,11 @@ void SpeechRecognizer::addLevelListener(const std::function<void(float)>& listen
     levelCallbackList.push_back(listener);
 }
 
+void SpeechRecognizer::setMeasureListener(const std::function<void(string, long)>& listener) 
+{
+    measureListener = listener;
+}
+
 // Remove a callback level
 void SpeechRecognizer::removeLevelListener(const std::function<void(float)>& listener)
 {
@@ -948,7 +953,7 @@ SpeechRecognizer::Recognize(int8_t* sampledBytes, int nBytes, int index)
                 [](auto c) { return std::tolower(c); });
 
             for (auto& it : recogCallbackList) {
-                it(recogText, false, false, false, false);
+                it(recogText, false, false, true, false);
             }
         }
     }
@@ -1112,8 +1117,15 @@ SpeechRecognizer::ProcessResampleRecogThread()
                     Sleep(10);
                     continue;
                 }
-
+                
+                auto start = std::chrono::high_resolution_clock::now();
                 hr = Recognize((int8_t*)wavHdr->lpData, wavHdr->dwBytesRecorded, curRecogBockIndex);
+
+                if (measureListener != NULL) {
+                    auto end = std::chrono::high_resolution_clock::now();
+                    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
+                    measureListener("ASR", duration);
+                }
 
                 if (hr != S_OK)
                 {

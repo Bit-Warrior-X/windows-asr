@@ -286,6 +286,12 @@ public:
     /// <param name="destroyStream"></param>
     void setContextBiasing(std::string hotWords, bool destroyStream);
 
+    /// <summary>
+    /// Set measure listener
+    /// </summary>
+    /// <param name="listener"></param>
+    void setMeasureListener(const std::function<void(string, long)>& listener);
+
 private:
     /// <summary>
     /// Configuation for ASR and VAD
@@ -322,6 +328,8 @@ private:
     /// A callback (text, isEndpoint, isReset, isVoiceActive, isNoSpeech) list
     /// </summary>
     vector<std::function<void(const std::string&, bool, bool, bool, bool)>> recogCallbackList;
+
+    std::function<void(string, long)> measureListener;
 
     /// <summary>
     /// A level callback list

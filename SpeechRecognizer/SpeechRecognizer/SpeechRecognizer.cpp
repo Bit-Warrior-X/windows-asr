@@ -44,6 +44,34 @@ SPEECHRECOGNIZER_API int fnSpeechRecognizer(void)
     return 0;
 }
 
+/// <summary>
+/// Helper class to manage WSTR memory
+/// </summary>
+class WStrWrapper {
+public:
+    WStrWrapper(const std::string& str) {
+        int numChars = MultiByteToWideChar(CP_UTF8, 0, str.c_str(), -1, nullptr, 0);
+        if (numChars == 0) {
+            wideStr = nullptr;
+            return;
+        }
+        wideStr = new wchar_t[numChars];
+        MultiByteToWideChar(CP_UTF8, 0, str.c_str(), -1, wideStr, numChars);
+    }
+
+    ~WStrWrapper() {
+        if (wideStr) delete[] wideStr;
+    }
+
+    LPCWSTR get() const { return wideStr; }
+
+private:
+    wchar_t* wideStr;
+    // Prevent copying
+    WStrWrapper(const WStrWrapper&) = delete;
+    WStrWrapper& operator=(const WStrWrapper&) = delete;
+};
+
 
 // This is the constructor of a class that has been exported.
 
@@ -378,10 +406,13 @@ SpeechRecognizer::stopListening()
     std::ofstream outfile(filenameSpeech, ios::trunc);
     outfile << speechText << std::endl;
     outfile.close();
+    cout << "save text file " << filenameSpeech << endl;   
 
     // Save audio file
     std::string filenameWAV = configuration.recordingDir + recordingPath + recordingId + "_" + std::to_string(value.count()) + ".wav";
     std::ofstream outfileaac(filenameWAV, ios::binary | ios::trunc);
+
+    cout << "save wav file " << filenameWAV << endl;
 
     outfileaac << std::string((const char*)&wh, (const char*)&wh + sizeof(WavHeader));
     for (auto it = WaveHdrList.begin(); it != WaveHdrList.end(); ++it) {
@@ -393,12 +424,22 @@ SpeechRecognizer::stopListening()
     }
     WaveHdrList.clear();
     outfileaac.close();
-    cout << "saved wave file" << endl;
-
 
     std::string filenameAAC = configuration.recordingDir + recordingPath + recordingId + "_" + std::to_string(value.count()) + ".aac";
+    cout << "convert wave " << filenameWAV << " to aac " << filenameAAC << endl;
 
-    ConvertWavToAac(ConvertToLPCWSTR(filenameWAV), ConvertToLPCWSTR(filenameAAC));
+    // Create wrappers that will automatically manage memory
+    WStrWrapper wavPath(filenameWAV);
+    WStrWrapper aacPath(filenameAAC);
+
+    cout << "Create wrappers for file" << endl;
+    if (wavPath.get() == nullptr || aacPath.get() == nullptr) {
+        std::cerr << "Failed to convert path to WSTR" << std::endl;
+        return 1;
+    }
+
+    ConvertWavToAac(wavPath.get(), aacPath.get());
+    cout << "Done convert wav to aac" << endl;
    
     if (configuration.recordSherpaAudio)
     {
@@ -1249,7 +1290,16 @@ SpeechRecognizer::ConvertWavToAac(LPCWSTR wavFilePath, LPCWSTR aacFilePath)
     HRESULT hr = S_OK;
 
     hr = MFCreateSourceReaderFromURL(wavFilePath, NULL, &pReader);
+    if (FAILED(hr)) {
+        std::cerr << "Failed to create source reader, hr: " << hr << std::endl;
+        return hr;
+    }
+
     hr = MFCreateSinkWriterFromURL(aacFilePath, NULL, NULL, &pWriter);
+    if (FAILED(hr)) {
+        std::cerr << "Failed to create sink writer, hr: " << hr << std::endl;
+        return hr;
+    }
 
     hr = pReader->GetCurrentMediaType((DWORD)MF_SOURCE_READER_FIRST_AUDIO_STREAM, &pInputType);
     hr = pInputType->GetUINT32(MF_MT_AUDIO_SAMPLES_PER_SECOND, &inputSampleRate);

@@ -9,7 +9,6 @@ A powerful, C++-based Automatic Speech Recognition (ASR) library for Windows, co
 ## 📖 Table of Contents
 
 * [🌟 Features](#-features)
-* [🎬 Demo](#-demo)
 * [🏗️ Architecture](#️-architecture)
 * [⚙️ Prerequisites](#️-prerequisites)
 * [🚀 Installation](#-installation)
@@ -34,20 +33,6 @@ A powerful, C++-based Automatic Speech Recognition (ASR) library for Windows, co
 * **UTF-8 & Multi-Language Support**: Leverage SAPI’s language packs for international applications.
 * **Thread-Safe**: Safe to use across multiple threads in your application.
 * **Console & GUI Samples**: Reference implementations to get started instantly.
-
----
-
-## 🎬 Demo
-
-<p align="center">
-  <img src="docs/screenshot_console.png" alt="Console Demo" width="45%" />
-  <img src="docs/screenshot_gui.png" alt="GUI Demo" width="45%" />
-</p>
-
-Try it yourself:
-
-1. Build the solution (see [Installation](#-installation)).
-2. Run the console demo or launch the GUI app.
 
 ---
 
